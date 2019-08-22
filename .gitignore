@@ -1,0 +1,6 @@
+*.swp
+*.raw
+build/
+*.dll
+*.jpg
+
