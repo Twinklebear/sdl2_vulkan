@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <algorithm>
 #include <array>
 #include <SDL.h>
 #include <SDL_syswm.h>
@@ -92,6 +93,13 @@ int main(int argc, const char **argv) {
 		std::vector<VkPhysicalDevice> devices(device_count, VkPhysicalDevice{});
 		vkEnumeratePhysicalDevices(vk_instance, &device_count, devices.data());
 
+		const bool has_discrete_gpu = std::find_if(devices.begin(), devices.end(),
+			[](const VkPhysicalDevice& d) {
+				VkPhysicalDeviceProperties properties;
+				vkGetPhysicalDeviceProperties(d, &properties);
+				return properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+			}) != devices.end();
+
 		for (const auto &d : devices) {
 			VkPhysicalDeviceProperties properties;
 			VkPhysicalDeviceFeatures features;
@@ -110,8 +118,12 @@ int main(int argc, const char **argv) {
 				std::cout << e.extensionName << "\n";
 			}
 
-			if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+			if (has_discrete_gpu && properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
 				vk_physical_device = d;
+				break;
+			} else if (!has_discrete_gpu && properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+				vk_physical_device = d;
+				break;
 			}
 		}
 	}
