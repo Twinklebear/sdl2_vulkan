@@ -118,7 +118,7 @@ function(add_spirv_embed_library)
 		add_custom_command(OUTPUT ${SPV_OUTPUT}
 			COMMAND ${SPIRV_COMPILER} ${CMAKE_CURRENT_LIST_DIR}/${shader}
 			${GLSL_INCLUDE_DIRECTORIES} ${GLSL_COMPILE_DEFNS}
-			--target-env=vulkan1.1 -mfmt=c -o ${SPV_OUTPUT}
+			--target-env=vulkan1.1 -mfmt=c -o ${SPV_OUTPUT} ${SPIRV_COMPILE_OPTIONS}
 			DEPENDS ${CMAKE_CURRENT_LIST_DIR}/${shader}
 			COMMENT "Compiling ${CMAKE_CURRENT_LIST_DIR}/${shader} to ${SPV_OUTPUT}")
 	endforeach()

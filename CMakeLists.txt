@@ -10,7 +10,8 @@ find_package(SDL2 REQUIRED)
 find_package(Vulkan REQUIRED)
 
 add_spirv_embed_library(spirv_shaders vert.vert frag.frag
-	raygen.rgen miss.rmiss hit.rchit)
+	raygen.rgen miss.rmiss hit.rchit
+	COMPILE_OPTIONS -g)
 
 add_executable(sdl2_vulkan main.cpp)
 

@@ -610,13 +610,23 @@ int main(int argc, const char** argv) {
 		std::memset(upload_mapping, 0, sizeof(VkGeometryInstanceNV));
 
 		// Transform is 4x3 row-major
+		// a b c
+		// e f g
+		// h i j
+		// k l m
+		// or do they mean 3x4 row-major?
+		// a b c d
+		// e f g h
+		// i j k l
+		// Because the identity seems to be set properly this way....
 		upload_mapping->transform[0] = 1.f;
-		upload_mapping->transform[4] = 1.f;
-		upload_mapping->transform[8] = 1.f;
-		upload_mapping->transform[11] = 1.f;
+		upload_mapping->transform[5] = 1.f;
+		upload_mapping->transform[10] = 1.f;
+		
 		upload_mapping->instance_custom_index = 0;
 		upload_mapping->mask = 0xff;
 		upload_mapping->instance_offset = 0;
+		upload_mapping->flags = VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_NV | VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
 		upload_mapping->acceleration_structure_handle = blas_handle;
 
 		vkUnmapMemory(vk_device, upload_mem);
@@ -941,8 +951,10 @@ int main(int argc, const char** argv) {
 		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 		info.size = 3 * raytracing_props.shaderGroupHandleSize;
 		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		info.usage = VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
 
-		info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		std::cout << "SBT size: " << info.size << "\n";
+
 		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &sbt_buffer));
 
 		VkMemoryRequirements mem_reqs = {};
