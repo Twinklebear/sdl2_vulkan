@@ -26,6 +26,16 @@ const std::array<float, 9> triangle_verts = {
 
 const std::array<uint32_t, 3> triangle_indices = { 0, 1, 2 };
 
+// See https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#acceleration-structure-instance
+struct VkGeometryInstanceNV {
+	float transform[12];
+	uint32_t instance_custom_index : 24;
+	uint32_t mask : 8;
+	uint32_t instance_offset : 24;
+	uint32_t flags : 8;
+	uint64_t acceleration_structure_handle;
+};
+
 PFN_vkCreateAccelerationStructureNV vkCreateAccelerationStructure;
 PFN_vkDestroyAccelerationStructureNV vkDestroyAccelerationStructure;
 PFN_vkBindAccelerationStructureMemoryNV vkBindAccelerationStructureMemory;
@@ -573,9 +583,9 @@ int main(int argc, const char **argv) {
 		vkBindBufferMemory(vk_device, index_buffer, index_mem, 0);
 
 		// Now map the upload heap buffer and copy our data in
-		float* upload_mapping = nullptr;
+		uint32_t* upload_mapping = nullptr;
 		vkMapMemory(vk_device, upload_mem, 0, info.size, 0, reinterpret_cast<void**>(&upload_mapping));
-		std::memcpy(upload_mapping, triangle_verts.data(), info.size);
+		std::memcpy(upload_mapping, triangle_indices.data(), info.size);
 		vkUnmapMemory(vk_device, upload_mem);
 
 		// Grab one of our command buffers and use it to record and run the upload
@@ -608,7 +618,7 @@ int main(int argc, const char **argv) {
 		vkFreeMemory(vk_device, upload_mem, nullptr);
 	}
 
-	// Now build the bottom level acceleration structure
+	// Build the bottom level acceleration structure
 	VkAccelerationStructureNV blas = VK_NULL_HANDLE;
 	VkDeviceMemory blas_mem = VK_NULL_HANDLE;
 	uint64_t blas_handle = 0;
@@ -713,6 +723,182 @@ int main(int argc, const char **argv) {
 		vkQueueWaitIdle(vk_queue);
 
 		CHECK_VULKAN(vkGetAccelerationStructureHandle(vk_device, blas, sizeof(uint64_t), &blas_handle));
+
+		// We didn't make the buffers individually reset-able, but we're just using it as temp
+		// one to do this upload so clear the pool to reset
+		vkResetCommandPool(vk_device, vk_command_pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+
+		// TODO LATER compaction via vkCmdCopyAccelerationStructureNV
+
+		vkDestroyBuffer(vk_device, scratch_buffer, nullptr);
+		vkFreeMemory(vk_device, scratch_mem, nullptr);
+	}
+
+	// Write the instance data
+	VkBuffer instance_buffer = VK_NULL_HANDLE;
+	VkDeviceMemory instance_mem = VK_NULL_HANDLE;
+	{
+		VkBufferCreateInfo info = {};
+		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		info.size = sizeof(VkGeometryInstanceNV);
+		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		VkBuffer upload_buffer = VK_NULL_HANDLE;
+		info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &upload_buffer));
+
+		info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &instance_buffer));
+
+		VkMemoryRequirements mem_reqs = {};
+		vkGetBufferMemoryRequirements(vk_device, instance_buffer, &mem_reqs);
+
+		// Allocate the upload staging buffer
+		VkMemoryAllocateInfo alloc_info = {};
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.allocationSize = mem_reqs.size;
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, mem_props);
+		VkDeviceMemory upload_mem = VK_NULL_HANDLE;
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &upload_mem));
+		vkBindBufferMemory(vk_device, upload_buffer, upload_mem, 0);
+
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_props);
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &instance_mem));
+		vkBindBufferMemory(vk_device, instance_buffer, instance_mem, 0);
+
+		// Now map the upload heap buffer and copy our data in
+		VkGeometryInstanceNV *upload_mapping = nullptr;
+		vkMapMemory(vk_device, upload_mem, 0, info.size, 0, reinterpret_cast<void**>(&upload_mapping));
+		std::memset(upload_mapping, 0, sizeof(VkGeometryInstanceNV));
+
+		// Transform is 4x3 row-major
+		upload_mapping->transform[0] = 1.f;
+		upload_mapping->transform[4] = 1.f;
+		upload_mapping->transform[8] = 1.f;
+		upload_mapping->transform[11] = 1.f;
+		upload_mapping->instance_custom_index = 0;
+		upload_mapping->mask = 0xff;
+		upload_mapping->instance_offset = 0;
+		upload_mapping->acceleration_structure_handle = blas_handle;
+
+		vkUnmapMemory(vk_device, upload_mem);
+
+		// Grab one of our command buffers and use it to record and run the upload
+		auto& cmd_buf = command_buffers[0];
+
+		VkCommandBufferBeginInfo begin_info = {};
+		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+
+		VkBufferCopy copy_cmd = {};
+		copy_cmd.size = info.size;
+		vkCmdCopyBuffer(cmd_buf, upload_buffer, instance_buffer, 1, &copy_cmd);
+
+		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+
+		// Submit the copy to run
+		VkSubmitInfo submit_info = {};
+		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submit_info.commandBufferCount = 1;
+		submit_info.pCommandBuffers = &command_buffers[0];
+		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
+		vkQueueWaitIdle(vk_queue);
+
+		// We didn't make the buffers individually reset-able, but we're just using it as temp
+		// one to do this upload so clear the pool to reset
+		vkResetCommandPool(vk_device, vk_command_pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+
+		vkDestroyBuffer(vk_device, upload_buffer, nullptr);
+		vkFreeMemory(vk_device, upload_mem, nullptr);
+	}
+
+	// Build the top level acceleration structure
+	VkAccelerationStructureNV tlas = VK_NULL_HANDLE;
+	VkDeviceMemory tlas_mem = VK_NULL_HANDLE;
+	uint64_t tlas_handle = 0;
+	{
+		VkAccelerationStructureInfoNV accel_info = {};
+		accel_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV;
+		accel_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV;
+		accel_info.instanceCount = 1;
+		accel_info.geometryCount = 0;
+
+		VkAccelerationStructureCreateInfoNV create_info = {};
+		create_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV;
+		create_info.info = accel_info;
+		CHECK_VULKAN(vkCreateAccelerationStructure(vk_device, &create_info, nullptr, &tlas));
+
+		// Determine how much memory the acceleration structure will need
+		VkAccelerationStructureMemoryRequirementsInfoNV mem_info = {};
+		mem_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
+		mem_info.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
+		mem_info.accelerationStructure = tlas;
+
+		VkMemoryRequirements2 mem_reqs = {};
+		vkGetAccelerationStructureMemoryRequirements(vk_device, &mem_info, &mem_reqs);
+		// TODO WILL: For a single triangle it requests 64k output and 64k scratch? It seems like a lot.
+		std::cout << "TLAS will need " << mem_reqs.memoryRequirements.size << "b output space\n";
+
+		VkMemoryAllocateInfo alloc_info = {};
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.allocationSize = mem_reqs.memoryRequirements.size;
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryRequirements.memoryTypeBits,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_props);
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &tlas_mem));
+
+		// Determine how much additional memory we need for the build
+		mem_info.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_BUILD_SCRATCH_NV;
+		vkGetAccelerationStructureMemoryRequirements(vk_device, &mem_info, &mem_reqs);
+		std::cout << "TLAS will need " << mem_reqs.memoryRequirements.size << "b scratch space\n";
+
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.allocationSize = mem_reqs.memoryRequirements.size;
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryRequirements.memoryTypeBits,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_props);
+		VkDeviceMemory scratch_mem = VK_NULL_HANDLE;
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &scratch_mem));
+
+		// Associate the scratch mem with a buffer
+		VkBufferCreateInfo info = {};
+		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		info.size = mem_reqs.memoryRequirements.size;
+		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		VkBuffer scratch_buffer = VK_NULL_HANDLE;
+		info.usage = VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
+		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &scratch_buffer));
+		vkBindBufferMemory(vk_device, scratch_buffer, scratch_mem, 0);
+
+		VkBindAccelerationStructureMemoryInfoNV bind_mem_info = {};
+		bind_mem_info.sType = VK_STRUCTURE_TYPE_BIND_ACCELERATION_STRUCTURE_MEMORY_INFO_NV;
+		bind_mem_info.accelerationStructure = tlas;
+		bind_mem_info.memory = tlas_mem;
+		CHECK_VULKAN(vkBindAccelerationStructureMemory(vk_device, 1, &bind_mem_info));
+
+		// Grab one of our command buffers and use it to record and run the upload
+		auto& cmd_buf = command_buffers[0];
+
+		VkCommandBufferBeginInfo begin_info = {};
+		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+
+		vkCmdBuildAccelerationStructure(cmd_buf, &accel_info, instance_buffer, 0, false, tlas, VK_NULL_HANDLE, scratch_buffer, 0);
+
+		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+
+		// Submit the copy to run
+		VkSubmitInfo submit_info = {};
+		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submit_info.commandBufferCount = 1;
+		submit_info.pCommandBuffers = &command_buffers[0];
+		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
+		vkQueueWaitIdle(vk_queue);
+
+		CHECK_VULKAN(vkGetAccelerationStructureHandle(vk_device, tlas, sizeof(uint64_t), &tlas_handle));
 
 		// We didn't make the buffers individually reset-able, but we're just using it as temp
 		// one to do this upload so clear the pool to reset
