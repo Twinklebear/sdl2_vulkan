@@ -70,7 +70,7 @@ void setup_vulkan_rtx_fcns(VkDevice &device) {
 int win_width = 1280;
 int win_height = 720;
 
-int main(int argc, const char **argv) {
+int main(int argc, const char** argv) {
 	if (SDL_Init(SDL_INIT_EVERYTHING) != 0) {
 		std::cerr << "Failed to init SDL: " << SDL_GetError() << "\n";
 		return -1;
@@ -78,7 +78,7 @@ int main(int argc, const char **argv) {
 
 	SDL_Window* window = SDL_CreateWindow("SDL2 + Vulkan",
 		SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_width, win_height, 0);
-	
+
 	{
 		uint32_t extension_count = 0;
 		vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr);
@@ -149,32 +149,33 @@ int main(int argc, const char **argv) {
 				return properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
 			}) != devices.end();
 
-		for (const auto &d : devices) {
-			VkPhysicalDeviceProperties properties;
-			VkPhysicalDeviceFeatures features;
-			vkGetPhysicalDeviceProperties(d, &properties);
-			vkGetPhysicalDeviceFeatures(d, &features);	
-			std::cout << properties.deviceName << "\n";
+			for (const auto& d : devices) {
+				VkPhysicalDeviceProperties properties;
+				VkPhysicalDeviceFeatures features;
+				vkGetPhysicalDeviceProperties(d, &properties);
+				vkGetPhysicalDeviceFeatures(d, &features);
+				std::cout << properties.deviceName << "\n";
 
-			// Check for RTX support
-			uint32_t extension_count = 0;
-			vkEnumerateDeviceExtensionProperties(d, nullptr, &extension_count, nullptr);
-			std::cout << "num extensions: " << extension_count << "\n";
-			std::vector<VkExtensionProperties> extensions(extension_count, VkExtensionProperties{});
-			vkEnumerateDeviceExtensionProperties(d, nullptr, &extension_count, extensions.data());
-			std::cout << "Device available extensions:\n";
-			for (const auto& e : extensions) {
-				std::cout << e.extensionName << "\n";
-			}
+				// Check for RTX support
+				uint32_t extension_count = 0;
+				vkEnumerateDeviceExtensionProperties(d, nullptr, &extension_count, nullptr);
+				std::cout << "num extensions: " << extension_count << "\n";
+				std::vector<VkExtensionProperties> extensions(extension_count, VkExtensionProperties{});
+				vkEnumerateDeviceExtensionProperties(d, nullptr, &extension_count, extensions.data());
+				std::cout << "Device available extensions:\n";
+				for (const auto& e : extensions) {
+					std::cout << e.extensionName << "\n";
+				}
 
-			if (has_discrete_gpu && properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-				vk_physical_device = d;
-				break;
-			} else if (!has_discrete_gpu && properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
-				vk_physical_device = d;
-				break;
+				if (has_discrete_gpu && properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+					vk_physical_device = d;
+					break;
+				}
+				else if (!has_discrete_gpu && properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+					vk_physical_device = d;
+					break;
+				}
 			}
-		}
 	}
 
 	VkDevice vk_device = VK_NULL_HANDLE;
@@ -277,7 +278,7 @@ int main(int argc, const char **argv) {
 		swapchain_images.resize(num_swapchain_imgs);
 		vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &num_swapchain_imgs, swapchain_images.data());
 
-		for (const auto &img : swapchain_images) {
+		for (const auto& img : swapchain_images) {
 			VkImageViewCreateInfo view_create_info = {};
 			view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 			view_create_info.image = img;
@@ -301,165 +302,6 @@ int main(int argc, const char **argv) {
 		}
 	}
 
-	// Build the pipeline
-	VkPipelineLayout vk_pipeline_layout;
-	VkRenderPass vk_render_pass;
-	VkPipeline vk_pipeline;
-	{
-		VkShaderModule vertex_shader_module = VK_NULL_HANDLE;
-
-		VkShaderModuleCreateInfo create_info = {};
-		create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		create_info.codeSize = sizeof(vert_spv);
-		create_info.pCode = vert_spv;
-		CHECK_VULKAN(vkCreateShaderModule(vk_device, &create_info, nullptr, &vertex_shader_module));
-		
-		VkPipelineShaderStageCreateInfo vertex_stage = {};
-		vertex_stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		vertex_stage.stage = VK_SHADER_STAGE_VERTEX_BIT;
-		vertex_stage.module = vertex_shader_module;
-		vertex_stage.pName = "main";
-
-		VkShaderModule fragment_shader_module = VK_NULL_HANDLE;
-		create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		create_info.codeSize = sizeof(frag_spv);
-		create_info.pCode = frag_spv;
-		CHECK_VULKAN(vkCreateShaderModule(vk_device, &create_info, nullptr, &fragment_shader_module));
-
-		VkPipelineShaderStageCreateInfo fragment_stage = {};
-		fragment_stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		fragment_stage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		fragment_stage.module = fragment_shader_module;
-		fragment_stage.pName = "main";
-
-		std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = { vertex_stage, fragment_stage };
-
-		// Vertex data hard-coded in vertex shader
-		VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
-		vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		vertex_input_info.vertexBindingDescriptionCount = 0;
-		vertex_input_info.vertexAttributeDescriptionCount = 0;
-
-		// Primitive type
-		VkPipelineInputAssemblyStateCreateInfo input_assembly = {};
-		input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-		input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-		input_assembly.primitiveRestartEnable = VK_FALSE;
-
-		// Viewport config
-		VkViewport viewport = {};
-		viewport.x = 0.0f;
-		viewport.y = 0.0f;
-		viewport.width = win_width;
-		viewport.height = win_height;
-		viewport.minDepth = 0.0f;
-		viewport.maxDepth = 1.0f;
-
-		// Scissor rect config
-		VkRect2D scissor = {};
-		scissor.offset.x = 0;
-		scissor.offset.y = 0;
-		scissor.extent = swapchain_extent;
-
-		VkPipelineViewportStateCreateInfo viewport_state_info = {};
-		viewport_state_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		viewport_state_info.viewportCount = 1;
-		viewport_state_info.pViewports = &viewport;
-		viewport_state_info.scissorCount = 1;
-		viewport_state_info.pScissors = &scissor;
-
-		VkPipelineRasterizationStateCreateInfo rasterizer_info = {};
-		rasterizer_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-		rasterizer_info.depthClampEnable = VK_FALSE;
-		rasterizer_info.rasterizerDiscardEnable = VK_FALSE;
-		rasterizer_info.polygonMode = VK_POLYGON_MODE_FILL;
-		rasterizer_info.lineWidth = 1.f;
-		rasterizer_info.cullMode = VK_CULL_MODE_BACK_BIT;
-		rasterizer_info.frontFace = VK_FRONT_FACE_CLOCKWISE;
-		rasterizer_info.depthBiasEnable = VK_FALSE;
-
-		VkPipelineMultisampleStateCreateInfo multisampling = {};
-		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		multisampling.sampleShadingEnable = VK_FALSE;
-		multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-		VkPipelineColorBlendAttachmentState blend_mode = {};
-		blend_mode.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-		blend_mode.blendEnable = VK_FALSE;
-
-		VkPipelineColorBlendStateCreateInfo blend_info = {};
-		blend_info.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		blend_info.logicOpEnable = VK_FALSE;
-		blend_info.attachmentCount = 1;
-		blend_info.pAttachments = &blend_mode;
-
-		VkPipelineLayoutCreateInfo pipeline_info = {};
-		pipeline_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		CHECK_VULKAN(vkCreatePipelineLayout(vk_device, &pipeline_info, nullptr, &vk_pipeline_layout));
-
-		VkAttachmentDescription color_attachment = {};
-		color_attachment.format = swapchain_img_format;
-		color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-		color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-		color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-		VkAttachmentReference color_attachment_ref = {};
-		color_attachment_ref.attachment = 0;
-		color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-		VkSubpassDescription subpass = {};
-		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-		subpass.colorAttachmentCount = 1;
-		subpass.pColorAttachments = &color_attachment_ref;
-
-		VkRenderPassCreateInfo render_pass_info = {};
-		render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-		render_pass_info.attachmentCount = 1;
-		render_pass_info.pAttachments = &color_attachment;
-		render_pass_info.subpassCount = 1;
-		render_pass_info.pSubpasses = &subpass;
-		CHECK_VULKAN(vkCreateRenderPass(vk_device, &render_pass_info, nullptr, &vk_render_pass));
-
-		VkGraphicsPipelineCreateInfo graphics_pipeline_info = {};
-		graphics_pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		graphics_pipeline_info.stageCount = 2;
-		graphics_pipeline_info.pStages = shader_stages.data();
-		graphics_pipeline_info.pVertexInputState = &vertex_input_info;
-		graphics_pipeline_info.pInputAssemblyState = &input_assembly;
-		graphics_pipeline_info.pViewportState = &viewport_state_info;
-		graphics_pipeline_info.pRasterizationState = &rasterizer_info;
-		graphics_pipeline_info.pMultisampleState = &multisampling;
-		graphics_pipeline_info.pColorBlendState = &blend_info;
-		graphics_pipeline_info.layout = vk_pipeline_layout;
-		graphics_pipeline_info.renderPass = vk_render_pass;
-		graphics_pipeline_info.subpass = 0;
-		CHECK_VULKAN(vkCreateGraphicsPipelines(vk_device, VK_NULL_HANDLE, 1, &graphics_pipeline_info, nullptr, &vk_pipeline));
-
-		vkDestroyShaderModule(vk_device, vertex_shader_module, nullptr);
-		vkDestroyShaderModule(vk_device, fragment_shader_module, nullptr);
-	}
-
-	// Setup framebuffers
-	std::vector<VkFramebuffer> framebuffers;
-	for (const auto &v : swapchain_image_views) {
-		std::array<VkImageView, 1> attachments = { v };
-		VkFramebufferCreateInfo create_info = {};
-		create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-		create_info.renderPass = vk_render_pass;
-		create_info.attachmentCount = 1;
-		create_info.pAttachments = attachments.data();
-		create_info.width = win_width;
-		create_info.height = win_height;
-		create_info.layers = 1;
-		VkFramebuffer fb = VK_NULL_HANDLE;
-		CHECK_VULKAN(vkCreateFramebuffer(vk_device, &create_info, nullptr, &fb));
-		framebuffers.push_back(fb);
-	}
-
 	// Setup the command pool
 	VkCommandPool vk_command_pool;
 	{
@@ -469,15 +311,18 @@ int main(int argc, const char **argv) {
 		CHECK_VULKAN(vkCreateCommandPool(vk_device, &create_info, nullptr, &vk_command_pool));
 	}
 
-	std::vector<VkCommandBuffer> command_buffers(framebuffers.size(), VkCommandBuffer{});
+	std::array<VkCommandBuffer, 2> command_buffers;
 	{
 		VkCommandBufferAllocateInfo info = {};
 		info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		info.commandPool = vk_command_pool;
 		info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		info.commandBufferCount = command_buffers.size();
+		info.commandBufferCount = 2;
 		CHECK_VULKAN(vkAllocateCommandBuffers(vk_device, &info, command_buffers.data()));
 	}
+
+	// Use the first commanf buffer for running some general stuff
+	VkCommandBuffer command_buffer = command_buffers[0];
 
 	// Upload vertex data to the GPU by staging in host memory, then copying to GPU memory
 	VkBuffer vertex_buffer = VK_NULL_HANDLE;
@@ -491,7 +336,7 @@ int main(int argc, const char **argv) {
 		VkBuffer upload_buffer = VK_NULL_HANDLE;
 		info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &upload_buffer));
-		
+
 		info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &vertex_buffer));
 
@@ -514,30 +359,27 @@ int main(int argc, const char **argv) {
 		vkBindBufferMemory(vk_device, vertex_buffer, vertex_mem, 0);
 
 		// Now map the upload heap buffer and copy our data in
-		float *upload_mapping = nullptr;
+		float* upload_mapping = nullptr;
 		vkMapMemory(vk_device, upload_mem, 0, info.size, 0, reinterpret_cast<void**>(&upload_mapping));
 		std::memcpy(upload_mapping, triangle_verts.data(), info.size);
 		vkUnmapMemory(vk_device, upload_mem);
 
-		// Grab one of our command buffers and use it to record and run the upload
-		auto& cmd_buf = command_buffers[0];
-
 		VkCommandBufferBeginInfo begin_info = {};
 		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+		CHECK_VULKAN(vkBeginCommandBuffer(command_buffer, &begin_info));
 
 		VkBufferCopy copy_cmd = {};
 		copy_cmd.size = info.size;
-		vkCmdCopyBuffer(cmd_buf, upload_buffer, vertex_buffer, 1, &copy_cmd);
+		vkCmdCopyBuffer(command_buffer, upload_buffer, vertex_buffer, 1, &copy_cmd);
 
-		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+		CHECK_VULKAN(vkEndCommandBuffer(command_buffer));
 
 		// Submit the copy to run
 		VkSubmitInfo submit_info = {};
 		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submit_info.commandBufferCount = 1;
-		submit_info.pCommandBuffers = &command_buffers[0];
+		submit_info.pCommandBuffers = &command_buffer;
 		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
 		vkQueueWaitIdle(vk_queue);
 
@@ -588,25 +430,22 @@ int main(int argc, const char **argv) {
 		std::memcpy(upload_mapping, triangle_indices.data(), info.size);
 		vkUnmapMemory(vk_device, upload_mem);
 
-		// Grab one of our command buffers and use it to record and run the upload
-		auto& cmd_buf = command_buffers[0];
-
 		VkCommandBufferBeginInfo begin_info = {};
 		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+		CHECK_VULKAN(vkBeginCommandBuffer(command_buffer, &begin_info));
 
 		VkBufferCopy copy_cmd = {};
 		copy_cmd.size = info.size;
-		vkCmdCopyBuffer(cmd_buf, upload_buffer, index_buffer, 1, &copy_cmd);
+		vkCmdCopyBuffer(command_buffer, upload_buffer, index_buffer, 1, &copy_cmd);
 
-		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+		CHECK_VULKAN(vkEndCommandBuffer(command_buffer));
 
 		// Submit the copy to run
 		VkSubmitInfo submit_info = {};
 		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submit_info.commandBufferCount = 1;
-		submit_info.pCommandBuffers = &command_buffers[0];
+		submit_info.pCommandBuffers = &command_buffer;
 		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
 		vkQueueWaitIdle(vk_queue);
 
@@ -660,7 +499,7 @@ int main(int argc, const char **argv) {
 		mem_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
 		mem_info.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
 		mem_info.accelerationStructure = blas;
-		
+
 		VkMemoryRequirements2 mem_reqs = {};
 		vkGetAccelerationStructureMemoryRequirements(vk_device, &mem_info, &mem_reqs);
 		// TODO WILL: For a single triangle it requests 64k output and 64k scratch? It seems like a lot.
@@ -684,7 +523,7 @@ int main(int argc, const char **argv) {
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_props);
 		VkDeviceMemory scratch_mem = VK_NULL_HANDLE;
 		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &scratch_mem));
-		
+
 		// Associate the scratch mem with a buffer
 		VkBufferCreateInfo info = {};
 		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -701,24 +540,21 @@ int main(int argc, const char **argv) {
 		bind_mem_info.accelerationStructure = blas;
 		bind_mem_info.memory = blas_mem;
 		CHECK_VULKAN(vkBindAccelerationStructureMemory(vk_device, 1, &bind_mem_info));
-		
-		// Grab one of our command buffers and use it to record and run the upload
-		auto &cmd_buf = command_buffers[0];
 
 		VkCommandBufferBeginInfo begin_info = {};
 		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+		CHECK_VULKAN(vkBeginCommandBuffer(command_buffer, &begin_info));
 
-		vkCmdBuildAccelerationStructure(cmd_buf, &accel_info, VK_NULL_HANDLE, 0, false, blas, VK_NULL_HANDLE, scratch_buffer, 0);
+		vkCmdBuildAccelerationStructure(command_buffer, &accel_info, VK_NULL_HANDLE, 0, false, blas, VK_NULL_HANDLE, scratch_buffer, 0);
 
-		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+		CHECK_VULKAN(vkEndCommandBuffer(command_buffer));
 
 		// Submit the copy to run
 		VkSubmitInfo submit_info = {};
 		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submit_info.commandBufferCount = 1;
-		submit_info.pCommandBuffers = &command_buffers[0];
+		submit_info.pCommandBuffers = &command_buffer;
 		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
 		vkQueueWaitIdle(vk_queue);
 
@@ -769,7 +605,7 @@ int main(int argc, const char **argv) {
 		vkBindBufferMemory(vk_device, instance_buffer, instance_mem, 0);
 
 		// Now map the upload heap buffer and copy our data in
-		VkGeometryInstanceNV *upload_mapping = nullptr;
+		VkGeometryInstanceNV* upload_mapping = nullptr;
 		vkMapMemory(vk_device, upload_mem, 0, info.size, 0, reinterpret_cast<void**>(&upload_mapping));
 		std::memset(upload_mapping, 0, sizeof(VkGeometryInstanceNV));
 
@@ -785,25 +621,22 @@ int main(int argc, const char **argv) {
 
 		vkUnmapMemory(vk_device, upload_mem);
 
-		// Grab one of our command buffers and use it to record and run the upload
-		auto& cmd_buf = command_buffers[0];
-
 		VkCommandBufferBeginInfo begin_info = {};
 		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+		CHECK_VULKAN(vkBeginCommandBuffer(command_buffer, &begin_info));
 
 		VkBufferCopy copy_cmd = {};
 		copy_cmd.size = info.size;
-		vkCmdCopyBuffer(cmd_buf, upload_buffer, instance_buffer, 1, &copy_cmd);
+		vkCmdCopyBuffer(command_buffer, upload_buffer, instance_buffer, 1, &copy_cmd);
 
-		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+		CHECK_VULKAN(vkEndCommandBuffer(command_buffer));
 
 		// Submit the copy to run
 		VkSubmitInfo submit_info = {};
 		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submit_info.commandBufferCount = 1;
-		submit_info.pCommandBuffers = &command_buffers[0];
+		submit_info.pCommandBuffers = &command_buffer;
 		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
 		vkQueueWaitIdle(vk_queue);
 
@@ -878,23 +711,20 @@ int main(int argc, const char **argv) {
 		bind_mem_info.memory = tlas_mem;
 		CHECK_VULKAN(vkBindAccelerationStructureMemory(vk_device, 1, &bind_mem_info));
 
-		// Grab one of our command buffers and use it to record and run the upload
-		auto& cmd_buf = command_buffers[0];
-
 		VkCommandBufferBeginInfo begin_info = {};
 		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+		CHECK_VULKAN(vkBeginCommandBuffer(command_buffer, &begin_info));
 
-		vkCmdBuildAccelerationStructure(cmd_buf, &accel_info, instance_buffer, 0, false, tlas, VK_NULL_HANDLE, scratch_buffer, 0);
+		vkCmdBuildAccelerationStructure(command_buffer, &accel_info, instance_buffer, 0, false, tlas, VK_NULL_HANDLE, scratch_buffer, 0);
 
-		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+		CHECK_VULKAN(vkEndCommandBuffer(command_buffer));
 
 		// Submit the copy to run
 		VkSubmitInfo submit_info = {};
 		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submit_info.commandBufferCount = 1;
-		submit_info.pCommandBuffers = &command_buffers[0];
+		submit_info.pCommandBuffers = &command_buffer;
 		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
 		vkQueueWaitIdle(vk_queue);
 
@@ -910,37 +740,388 @@ int main(int argc, const char **argv) {
 		vkFreeMemory(vk_device, scratch_mem, nullptr);
 	}
 
-	// Now record the rendering commands (TODO: Could also do this pre-recording in the DXR backend
-	// of rtobj. Will there be much perf. difference?)
-	for (size_t i = 0; i < command_buffers.size(); ++i) {
-		auto& cmd_buf = command_buffers[i];
+	// Setup the output image
+	VkImage rt_output = VK_NULL_HANDLE;
+	VkImageView rt_output_view = VK_NULL_HANDLE;
+	{
+		VkImageCreateInfo create_info = {};
+		create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		create_info.imageType = VK_IMAGE_TYPE_2D;
+		create_info.format = swapchain_img_format;
+		create_info.extent.width = win_width;
+		create_info.extent.height = win_height;
+		create_info.extent.depth = 1;
+		create_info.mipLevels = 1;
+		create_info.arrayLayers = 1;
+		create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+		create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+		create_info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+		create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		CHECK_VULKAN(vkCreateImage(vk_device, &create_info, nullptr, &rt_output));
 
+		VkMemoryRequirements mem_reqs = {};
+		vkGetImageMemoryRequirements(vk_device, rt_output, &mem_reqs);
+
+		// Allocate the upload staging buffer
+		VkMemoryAllocateInfo alloc_info = {};
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.allocationSize = mem_reqs.size;
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_props);
+		VkDeviceMemory img_mem = VK_NULL_HANDLE;
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &img_mem));
+		CHECK_VULKAN(vkBindImageMemory(vk_device, rt_output, img_mem, 0));
+
+		VkImageViewCreateInfo view_create_info = {};
+		view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		view_create_info.image = rt_output;
+		view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		view_create_info.format = swapchain_img_format;
+
+		view_create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+		view_create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+		view_create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+		view_create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+		view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		view_create_info.subresourceRange.baseMipLevel = 0;
+		view_create_info.subresourceRange.levelCount = 1;
+		view_create_info.subresourceRange.baseArrayLayer = 0;
+		view_create_info.subresourceRange.layerCount = 1;
+
+		CHECK_VULKAN(vkCreateImageView(vk_device, &view_create_info, nullptr, &rt_output_view));
+
+		// Transition the image over to general layout so we can write to it in the raygen program
 		VkCommandBufferBeginInfo begin_info = {};
 		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		CHECK_VULKAN(vkBeginCommandBuffer(command_buffer, &begin_info));
 
-		VkRenderPassBeginInfo render_pass_info = {};
-		render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-		render_pass_info.renderPass = vk_render_pass;
-		render_pass_info.framebuffer = framebuffers[i];
-		render_pass_info.renderArea.offset.x = 0;
-		render_pass_info.renderArea.offset.y = 0;
-		render_pass_info.renderArea.extent = swapchain_extent;
-		
-		VkClearValue clear_color = { 0.f, 0.f, 0.f, 1.f };
-		render_pass_info.clearValueCount = 1;
-		render_pass_info.pClearValues = &clear_color;
+		VkImageMemoryBarrier img_mem_barrier = {};
+		img_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		img_mem_barrier.image = rt_output;
+		img_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		img_mem_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		img_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		img_mem_barrier.subresourceRange.baseMipLevel = 0;
+		img_mem_barrier.subresourceRange.levelCount = 1;
+		img_mem_barrier.subresourceRange.baseArrayLayer = 0;
+		img_mem_barrier.subresourceRange.layerCount = 1;
 
-		vkCmdBeginRenderPass(cmd_buf, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+		vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			0, 0, nullptr, 0, nullptr, 1, &img_mem_barrier);
 
-		vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
+		CHECK_VULKAN(vkEndCommandBuffer(command_buffer));
 
-		// Draw our "triangle" embedded in the shader
-		vkCmdDraw(cmd_buf, 3, 1, 0, 0);
+		// Submit the copy to run
+		VkSubmitInfo submit_info = {};
+		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submit_info.commandBufferCount = 1;
+		submit_info.pCommandBuffers = &command_buffer;
+		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
+		vkQueueWaitIdle(vk_queue);
 
-		vkCmdEndRenderPass(cmd_buf);
+		// We didn't make the buffers individually reset-able, but we're just using it as temp
+		// one to do this upload so clear the pool to reset
+		vkResetCommandPool(vk_device, vk_command_pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+	}
 
-		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+	// Desriptors for current test pipeline
+	// 0: top level AS
+	// 1: output image view
+	// SBT Layout:
+	// 0: raygen
+	// 1: miss
+	// 2: hitgroup
+	// Build the ray tracing pipeline
+	VkPipeline rt_pipeline = VK_NULL_HANDLE;
+	VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+	VkDescriptorSetLayout desc_layout = VK_NULL_HANDLE;
+	{
+		VkDescriptorSetLayoutBinding tlas_binding = {};
+		tlas_binding.binding = 0;
+		tlas_binding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV;
+		tlas_binding.descriptorCount = 1;
+		tlas_binding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV;
+
+		VkDescriptorSetLayoutBinding fb_binding = {};
+		fb_binding.binding = 1;
+		fb_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		fb_binding.descriptorCount = 1;
+		fb_binding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_NV;
+
+		const std::array<VkDescriptorSetLayoutBinding, 2> desc_set = {
+			tlas_binding, fb_binding
+		};
+
+		VkDescriptorSetLayoutCreateInfo desc_create_info = {};
+		desc_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		desc_create_info.bindingCount = desc_set.size();
+		desc_create_info.pBindings = desc_set.data();
+
+		CHECK_VULKAN(vkCreateDescriptorSetLayout(vk_device, &desc_create_info, nullptr, &desc_layout));
+
+		VkPipelineLayoutCreateInfo pipeline_create_info = {};
+		pipeline_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		pipeline_create_info.setLayoutCount = 1;
+		pipeline_create_info.pSetLayouts = &desc_layout;
+
+		CHECK_VULKAN(vkCreatePipelineLayout(vk_device, &pipeline_create_info, nullptr, &pipeline_layout));
+
+		// Load the shader modules for our pipeline
+		VkShaderModuleCreateInfo create_info = {};
+		create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		create_info.codeSize = sizeof(raygen_spv);
+		create_info.pCode = raygen_spv;
+		VkShaderModule raygen_shader_module = VK_NULL_HANDLE;
+		CHECK_VULKAN(vkCreateShaderModule(vk_device, &create_info, nullptr, &raygen_shader_module));
+
+		create_info.codeSize = sizeof(miss_spv);
+		create_info.pCode = miss_spv;
+		VkShaderModule miss_shader_module = VK_NULL_HANDLE;
+		CHECK_VULKAN(vkCreateShaderModule(vk_device, &create_info, nullptr, &miss_shader_module));
+
+		create_info.codeSize = sizeof(hit_spv);
+		create_info.pCode = hit_spv;
+		VkShaderModule closest_hit_shader_module = VK_NULL_HANDLE;
+		CHECK_VULKAN(vkCreateShaderModule(vk_device, &create_info, nullptr, &closest_hit_shader_module));
+
+		std::array<VkPipelineShaderStageCreateInfo, 3> shader_create_info = { VkPipelineShaderStageCreateInfo{} };
+		for (auto& ci : shader_create_info) {
+			ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+			ci.pName = "main";
+		}
+		shader_create_info[0].stage = VK_SHADER_STAGE_RAYGEN_BIT_NV;
+		shader_create_info[0].module = raygen_shader_module;
+
+		shader_create_info[1].stage = VK_SHADER_STAGE_MISS_BIT_NV;
+		shader_create_info[1].module = miss_shader_module;
+
+		shader_create_info[2].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+		shader_create_info[2].module = closest_hit_shader_module;
+
+		std::array<VkRayTracingShaderGroupCreateInfoNV, 3> rt_shader_groups = { VkRayTracingShaderGroupCreateInfoNV{} };
+		for (auto& g : rt_shader_groups) {
+			g.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV;
+			g.generalShader = VK_SHADER_UNUSED_NV;
+			g.closestHitShader = VK_SHADER_UNUSED_NV;
+			g.anyHitShader = VK_SHADER_UNUSED_NV;
+			g.intersectionShader = VK_SHADER_UNUSED_NV;
+		}
+
+		// Raygen group [0]
+		rt_shader_groups[0].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
+		rt_shader_groups[0].generalShader = 0;
+
+		// Miss group [1]
+		rt_shader_groups[1].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
+		rt_shader_groups[1].generalShader = 1;
+
+		// Hit group [2]
+		rt_shader_groups[2].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_NV;
+		rt_shader_groups[2].closestHitShader = 2;
+
+		VkRayTracingPipelineCreateInfoNV rt_pipeline_create_info = {};
+		rt_pipeline_create_info.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_NV;
+		rt_pipeline_create_info.stageCount = shader_create_info.size();
+		rt_pipeline_create_info.pStages = shader_create_info.data();
+		rt_pipeline_create_info.groupCount = rt_shader_groups.size();
+		rt_pipeline_create_info.pGroups = rt_shader_groups.data();
+		rt_pipeline_create_info.maxRecursionDepth = 1;
+		rt_pipeline_create_info.layout = pipeline_layout;
+		CHECK_VULKAN(vkCreateRayTracingPipelines(vk_device, VK_NULL_HANDLE, 1, &rt_pipeline_create_info, nullptr, &rt_pipeline));
+	}
+
+	// Build the SBT
+	// TODO: Layer for perf this should also be uploaded to the device
+	VkBuffer sbt_buffer = VK_NULL_HANDLE;
+	VkDeviceMemory sbt_mem = VK_NULL_HANDLE;
+	{
+		VkBufferCreateInfo info = {};
+		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		info.size = 3 * raytracing_props.shaderGroupHandleSize;
+		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &sbt_buffer));
+
+		VkMemoryRequirements mem_reqs = {};
+		vkGetBufferMemoryRequirements(vk_device, sbt_buffer, &mem_reqs);
+
+		VkMemoryAllocateInfo alloc_info = {};
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.allocationSize = mem_reqs.size;
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, mem_props);
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &sbt_mem));
+		vkBindBufferMemory(vk_device, sbt_buffer, sbt_mem, 0);
+
+		uint8_t* sbt_mapping = nullptr;
+		vkMapMemory(vk_device, sbt_mem, 0, info.size, 0, reinterpret_cast<void**>(&sbt_mapping));
+
+		// Get the shader identifiers
+		// Note: for now this is the same size as the SBT, but this will not always be the case
+		std::vector<uint8_t> shader_identifiers(3 * raytracing_props.shaderGroupHandleSize, 0);
+		CHECK_VULKAN(vkGetRayTracingShaderGroupHandles(vk_device, rt_pipeline, 0, 3,
+			shader_identifiers.size(), shader_identifiers.data()));
+
+		// Copy raygen handle
+		std::memcpy(sbt_mapping, shader_identifiers.data(), raytracing_props.shaderGroupHandleSize);
+		// Copy miss handle
+		std::memcpy(sbt_mapping + raytracing_props.shaderGroupHandleSize,
+			shader_identifiers.data() + raytracing_props.shaderGroupHandleSize,
+			raytracing_props.shaderGroupHandleSize);
+		// Copy hitgroup handle
+		std::memcpy(sbt_mapping + 2 * raytracing_props.shaderGroupHandleSize,
+			shader_identifiers.data() + 2 * raytracing_props.shaderGroupHandleSize,
+			raytracing_props.shaderGroupHandleSize);
+
+		vkUnmapMemory(vk_device, sbt_mem);
+	}
+
+	// Build the descriptor set
+	VkDescriptorPool desc_pool = VK_NULL_HANDLE;
+	VkDescriptorSet desc_set = VK_NULL_HANDLE;
+	{
+		const std::array<VkDescriptorPoolSize, 2> pool_sizes = {
+			VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV, 1 },
+			VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 }
+		};
+		VkDescriptorPoolCreateInfo pool_create_info = {};
+		pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		pool_create_info.maxSets = 1;
+		pool_create_info.poolSizeCount = pool_sizes.size();
+		pool_create_info.pPoolSizes = pool_sizes.data();
+		CHECK_VULKAN(vkCreateDescriptorPool(vk_device, &pool_create_info, nullptr, &desc_pool));
+
+		VkDescriptorSetAllocateInfo alloc_info = {};
+		alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		alloc_info.descriptorPool = desc_pool;
+		alloc_info.descriptorSetCount = 1;
+		alloc_info.pSetLayouts = &desc_layout;
+		CHECK_VULKAN(vkAllocateDescriptorSets(vk_device, &alloc_info, &desc_set));
+
+		VkWriteDescriptorSetAccelerationStructureNV write_tlas_info = {};
+		write_tlas_info.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_NV;
+		write_tlas_info.accelerationStructureCount = 1;
+		write_tlas_info.pAccelerationStructures = &tlas;
+
+		VkWriteDescriptorSet write_tlas = {};
+		write_tlas.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		write_tlas.pNext = &write_tlas_info;
+		write_tlas.dstSet = desc_set;
+		write_tlas.dstBinding = 0;
+		write_tlas.descriptorCount = 1;
+		write_tlas.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV;
+
+		VkDescriptorImageInfo img_desc = {};
+		img_desc.imageView = rt_output_view;
+		img_desc.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+		VkWriteDescriptorSet write_img = {};
+		write_img.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		write_img.dstSet = desc_set;
+		write_img.dstBinding = 1;
+		write_img.descriptorCount = 1;
+		write_img.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		write_img.pImageInfo = &img_desc;
+
+		const std::array<VkWriteDescriptorSet, 2> write_descs = { write_tlas, write_img };
+		vkUpdateDescriptorSets(vk_device, write_descs.size(), write_descs.data(), 0, nullptr);
+	}
+
+	// Finally, record the rendering commands
+	{
+		for (size_t i = 0; i < command_buffers.size(); ++i) {
+			VkCommandBufferBeginInfo begin_info = {};
+			begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+			CHECK_VULKAN(vkBeginCommandBuffer(command_buffers[i], &begin_info));
+
+			vkCmdBindPipeline(command_buffers[i], VK_PIPELINE_BIND_POINT_RAY_TRACING_NV, rt_pipeline);
+			vkCmdBindDescriptorSets(command_buffers[i], VK_PIPELINE_BIND_POINT_RAY_TRACING_NV,
+				pipeline_layout, 0, 1, &desc_set, 0, nullptr);
+
+			vkCmdTraceRays(command_buffers[i],
+				sbt_buffer, 0,
+				sbt_buffer, raytracing_props.shaderGroupHandleSize, raytracing_props.shaderGroupHandleSize,
+				sbt_buffer, raytracing_props.shaderGroupHandleSize * 2, raytracing_props.shaderGroupHandleSize,
+				VK_NULL_HANDLE, 0, 0, win_width, win_height, 1);
+
+			// Transition swapchain image to copy dst and render output to copy source
+			// TODO: Are these barriers necessary? From the docs on vkCmdCopyImage it sounds like
+			// the src and dst layouts are already ok for the copy
+			{
+				std::array<VkImageMemoryBarrier, 2> barriers;
+				for (auto &b : barriers) {
+					b = VkImageMemoryBarrier{};
+					b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+					b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+					b.subresourceRange.baseMipLevel = 0;
+					b.subresourceRange.levelCount = 1;
+					b.subresourceRange.baseArrayLayer = 0;
+					b.subresourceRange.layerCount = 1;
+				}
+				barriers[0].image = swapchain_images[i];
+				barriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+				barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+				barriers[1].image = rt_output;
+				barriers[1].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+				barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	
+				vkCmdPipelineBarrier(command_buffers[i], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+					0, 0, nullptr, 0, nullptr, barriers.size(), barriers.data());
+			}
+
+			VkImageSubresourceLayers copy_subresource = {};
+			copy_subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			copy_subresource.mipLevel = 0;
+			copy_subresource.baseArrayLayer = 0;
+			copy_subresource.layerCount = 1;
+
+			VkImageCopy img_copy = {};
+			img_copy.srcSubresource = copy_subresource;
+			img_copy.srcOffset.x = 0;
+			img_copy.srcOffset.y = 0;
+			img_copy.srcOffset.z = 0;
+			
+			img_copy.dstSubresource = copy_subresource;
+			img_copy.dstOffset.x = 0;
+			img_copy.dstOffset.y = 0;
+			img_copy.dstOffset.z = 0;
+
+			img_copy.extent.width = win_width;
+			img_copy.extent.height = win_height;
+			img_copy.extent.depth = 1;
+
+			vkCmdCopyImage(command_buffers[i], rt_output, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				swapchain_images[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				1, &img_copy);
+
+			// Transition the images back to their original layouts
+			{
+				std::array<VkImageMemoryBarrier, 2> barriers;
+				for (auto& b : barriers) {
+					b = VkImageMemoryBarrier{};
+					b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+					b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+					b.subresourceRange.baseMipLevel = 0;
+					b.subresourceRange.levelCount = 1;
+					b.subresourceRange.baseArrayLayer = 0;
+					b.subresourceRange.layerCount = 1;
+				}
+				barriers[0].image = swapchain_images[i];
+				barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+				barriers[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+				barriers[1].image = rt_output;
+				barriers[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+				barriers[1].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+				vkCmdPipelineBarrier(command_buffers[i], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+					0, 0, nullptr, 0, nullptr, barriers.size(), barriers.data());
+			}
+
+			CHECK_VULKAN(vkEndCommandBuffer(command_buffers[i]));
+		}
 	}
 
 	VkSemaphore img_avail_semaphore = VK_NULL_HANDLE;
@@ -990,7 +1171,7 @@ int main(int argc, const char **argv) {
 		const std::array<VkPipelineStageFlags, 1> wait_stages = { VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT };
 
 		CHECK_VULKAN(vkResetFences(vk_device, 1, &vk_fence));
-		
+
 		VkSubmitInfo submit_info = {};
 		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submit_info.waitSemaphoreCount = wait_semaphores.size();
@@ -1002,6 +1183,7 @@ int main(int argc, const char **argv) {
 		submit_info.pSignalSemaphores = signal_semaphores.data();
 		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, vk_fence));
 
+	
 		// Finally, present the updated image in the swap chain
 		std::array<VkSwapchainKHR, 1> present_chain = { vk_swapchain };
 		VkPresentInfoKHR present_info = {};
@@ -1022,12 +1204,7 @@ int main(int argc, const char **argv) {
 	vkDestroyFence(vk_device, vk_fence, nullptr);
 	vkDestroyCommandPool(vk_device, vk_command_pool, nullptr);
 	vkDestroySwapchainKHR(vk_device, vk_swapchain, nullptr);
-	for (auto &fb : framebuffers) {
-		vkDestroyFramebuffer(vk_device, fb, nullptr);
-	}
-	vkDestroyPipeline(vk_device, vk_pipeline, nullptr);
-	vkDestroyRenderPass(vk_device, vk_render_pass, nullptr);
-	vkDestroyPipelineLayout(vk_device, vk_pipeline_layout, nullptr);
+	
 	for (auto &v : swapchain_image_views) {
 		vkDestroyImageView(vk_device, v, nullptr);
 	}	

@@ -106,6 +106,7 @@ function(add_spirv_embed_library)
 		list(APPEND GLSL_COMPILE_DEFNS "-D${def}")
 	endforeach()
 
+	# TODO: Dependency tracking for shader includes (-MM to glslc)
 	# Compile each GLSL file to embedded SPIRV bytecode
 	set(SPIRV_LIB ${ARGV0})
 	set(SPIRV_BINARIES "")
