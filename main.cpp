@@ -18,6 +18,45 @@
 		} \
 	}
 
+const std::array<float, 9> triangle_verts = {
+	0.0, -0.5, 0.0,
+	0.5, 0.5, 0.0,
+	-0.5, 0.5, 0.0
+};
+
+const std::array<uint32_t, 3> triangle_indices = { 0, 1, 2 };
+
+PFN_vkCreateAccelerationStructureNV vkCreateAccelerationStructure;
+PFN_vkDestroyAccelerationStructureNV vkDestroyAccelerationStructure;
+PFN_vkBindAccelerationStructureMemoryNV vkBindAccelerationStructureMemory;
+PFN_vkGetAccelerationStructureHandleNV vkGetAccelerationStructureHandle;
+PFN_vkGetAccelerationStructureMemoryRequirementsNV vkGetAccelerationStructureMemoryRequirements;
+PFN_vkCmdBuildAccelerationStructureNV vkCmdBuildAccelerationStructure;
+PFN_vkCreateRayTracingPipelinesNV vkCreateRayTracingPipelines;
+PFN_vkGetRayTracingShaderGroupHandlesNV vkGetRayTracingShaderGroupHandles;
+PFN_vkCmdTraceRaysNV vkCmdTraceRays;
+
+uint32_t get_memory_type_index(uint32_t type_filter, VkMemoryPropertyFlags props, const VkPhysicalDeviceMemoryProperties &mem_props) {
+	for (uint32_t i = 0; i < mem_props.memoryTypeCount; ++i) {
+		if (type_filter & (1 << i) && (mem_props.memoryTypes[i].propertyFlags & props) == props) {
+			return i;
+		}
+	}
+	throw std::runtime_error("failed to find appropriate memory");
+}
+
+void setup_vulkan_rtx_fcns(VkDevice &device) {
+	vkCreateAccelerationStructure = reinterpret_cast<PFN_vkCreateAccelerationStructureNV>(vkGetDeviceProcAddr(device, "vkCreateAccelerationStructureNV"));
+	vkDestroyAccelerationStructure = reinterpret_cast<PFN_vkDestroyAccelerationStructureNV>(vkGetDeviceProcAddr(device, "vkDestroyAccelerationStructureNV"));
+	vkBindAccelerationStructureMemory = reinterpret_cast<PFN_vkBindAccelerationStructureMemoryNV>(vkGetDeviceProcAddr(device, "vkBindAccelerationStructureMemoryNV"));
+	vkGetAccelerationStructureHandle = reinterpret_cast<PFN_vkGetAccelerationStructureHandleNV>(vkGetDeviceProcAddr(device, "vkGetAccelerationStructureHandleNV"));
+	vkGetAccelerationStructureMemoryRequirements = reinterpret_cast<PFN_vkGetAccelerationStructureMemoryRequirementsNV>(vkGetDeviceProcAddr(device, "vkGetAccelerationStructureMemoryRequirementsNV"));
+	vkCmdBuildAccelerationStructure = reinterpret_cast<PFN_vkCmdBuildAccelerationStructureNV>(vkGetDeviceProcAddr(device, "vkCmdBuildAccelerationStructureNV"));
+	vkCreateRayTracingPipelines = reinterpret_cast<PFN_vkCreateRayTracingPipelinesNV>(vkGetDeviceProcAddr(device, "vkCreateRayTracingPipelinesNV"));
+	vkGetRayTracingShaderGroupHandles = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesNV>(vkGetDeviceProcAddr(device, "vkGetRayTracingShaderGroupHandlesNV"));
+	vkCmdTraceRays = reinterpret_cast<PFN_vkCmdTraceRaysNV>(vkGetDeviceProcAddr(device, "vkCmdTraceRaysNV"));
+}
+
 int win_width = 1280;
 int win_height = 720;
 
@@ -154,10 +193,10 @@ int main(int argc, const char **argv) {
 		queue_create_info.pQueuePriorities = &queue_priority;
 
 		VkPhysicalDeviceFeatures device_features = {};
-		// TODO: RTX feature
 
-		const std::array<const char*, 1> device_extensions = {
-			VK_KHR_SWAPCHAIN_EXTENSION_NAME
+		const std::array<const char*, 3> device_extensions = {
+			VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_NV_RAY_TRACING_EXTENSION_NAME,
+			VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME
 		};
 
 		VkDeviceCreateInfo create_info = {};
@@ -170,8 +209,28 @@ int main(int argc, const char **argv) {
 		create_info.ppEnabledExtensionNames = device_extensions.data();
 		create_info.pEnabledFeatures = &device_features;
 		CHECK_VULKAN(vkCreateDevice(vk_physical_device, &create_info, nullptr, &vk_device));
+		setup_vulkan_rtx_fcns(vk_device);
 
 		vkGetDeviceQueue(vk_device, graphics_queue_index, 0, &vk_queue);
+	}
+
+	VkPhysicalDeviceMemoryProperties mem_props = {};
+	vkGetPhysicalDeviceMemoryProperties(vk_physical_device, &mem_props);
+
+	// Query info about raytracing capabilities, shader header size, etc.
+	VkPhysicalDeviceRayTracingPropertiesNV raytracing_props = {};
+	{
+		raytracing_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PROPERTIES_NV;
+		VkPhysicalDeviceProperties2 props = {};
+		props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+		props.pNext = &raytracing_props;
+		props.properties = {};
+		vkGetPhysicalDeviceProperties2(vk_physical_device, &props);
+
+		std::cout << "Raytracing props:\n"
+			<< "max recursion depth: " << raytracing_props.maxRecursionDepth
+			<< "\nSBT handle size: " << raytracing_props.shaderGroupHandleSize
+			<< "\nShader group base align: " << raytracing_props.shaderGroupBaseAlignment << "\n";
 	}
 
 	// Setup swapchain, assume a real GPU so don't bother querying the capabilities, just get what we want
@@ -408,6 +467,261 @@ int main(int argc, const char **argv) {
 		info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 		info.commandBufferCount = command_buffers.size();
 		CHECK_VULKAN(vkAllocateCommandBuffers(vk_device, &info, command_buffers.data()));
+	}
+
+	// Upload vertex data to the GPU by staging in host memory, then copying to GPU memory
+	VkBuffer vertex_buffer = VK_NULL_HANDLE;
+	VkDeviceMemory vertex_mem = VK_NULL_HANDLE;
+	{
+		VkBufferCreateInfo info = {};
+		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		info.size = sizeof(float) * triangle_verts.size();
+		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		VkBuffer upload_buffer = VK_NULL_HANDLE;
+		info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &upload_buffer));
+		
+		info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &vertex_buffer));
+
+		VkMemoryRequirements mem_reqs = {};
+		vkGetBufferMemoryRequirements(vk_device, vertex_buffer, &mem_reqs);
+
+		// Allocate the upload staging buffer
+		VkMemoryAllocateInfo alloc_info = {};
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.allocationSize = mem_reqs.size;
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, mem_props);
+		VkDeviceMemory upload_mem = VK_NULL_HANDLE;
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &upload_mem));
+		vkBindBufferMemory(vk_device, upload_buffer, upload_mem, 0);
+
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_props);
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &vertex_mem));
+		vkBindBufferMemory(vk_device, vertex_buffer, vertex_mem, 0);
+
+		// Now map the upload heap buffer and copy our data in
+		float *upload_mapping = nullptr;
+		vkMapMemory(vk_device, upload_mem, 0, info.size, 0, reinterpret_cast<void**>(&upload_mapping));
+		std::memcpy(upload_mapping, triangle_verts.data(), info.size);
+		vkUnmapMemory(vk_device, upload_mem);
+
+		// Grab one of our command buffers and use it to record and run the upload
+		auto& cmd_buf = command_buffers[0];
+
+		VkCommandBufferBeginInfo begin_info = {};
+		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+
+		VkBufferCopy copy_cmd = {};
+		copy_cmd.size = info.size;
+		vkCmdCopyBuffer(cmd_buf, upload_buffer, vertex_buffer, 1, &copy_cmd);
+
+		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+
+		// Submit the copy to run
+		VkSubmitInfo submit_info = {};
+		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submit_info.commandBufferCount = 1;
+		submit_info.pCommandBuffers = &command_buffers[0];
+		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
+		vkQueueWaitIdle(vk_queue);
+
+		// We didn't make the buffers individually reset-able, but we're just using it as temp
+		// one to do this upload so clear the pool to reset
+		vkResetCommandPool(vk_device, vk_command_pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+
+		vkDestroyBuffer(vk_device, upload_buffer, nullptr);
+		vkFreeMemory(vk_device, upload_mem, nullptr);
+	}
+
+	VkBuffer index_buffer = VK_NULL_HANDLE;
+	VkDeviceMemory index_mem = VK_NULL_HANDLE;
+	{
+		VkBufferCreateInfo info = {};
+		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		info.size = sizeof(uint32_t) * triangle_indices.size();
+		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		VkBuffer upload_buffer = VK_NULL_HANDLE;
+		info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &upload_buffer));
+
+		info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &index_buffer));
+
+		VkMemoryRequirements mem_reqs = {};
+		vkGetBufferMemoryRequirements(vk_device, index_buffer, &mem_reqs);
+
+		// Allocate the upload staging buffer
+		VkMemoryAllocateInfo alloc_info = {};
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.allocationSize = mem_reqs.size;
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, mem_props);
+		VkDeviceMemory upload_mem = VK_NULL_HANDLE;
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &upload_mem));
+		vkBindBufferMemory(vk_device, upload_buffer, upload_mem, 0);
+
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_props);
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &index_mem));
+		vkBindBufferMemory(vk_device, index_buffer, index_mem, 0);
+
+		// Now map the upload heap buffer and copy our data in
+		float* upload_mapping = nullptr;
+		vkMapMemory(vk_device, upload_mem, 0, info.size, 0, reinterpret_cast<void**>(&upload_mapping));
+		std::memcpy(upload_mapping, triangle_verts.data(), info.size);
+		vkUnmapMemory(vk_device, upload_mem);
+
+		// Grab one of our command buffers and use it to record and run the upload
+		auto& cmd_buf = command_buffers[0];
+
+		VkCommandBufferBeginInfo begin_info = {};
+		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+
+		VkBufferCopy copy_cmd = {};
+		copy_cmd.size = info.size;
+		vkCmdCopyBuffer(cmd_buf, upload_buffer, index_buffer, 1, &copy_cmd);
+
+		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+
+		// Submit the copy to run
+		VkSubmitInfo submit_info = {};
+		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submit_info.commandBufferCount = 1;
+		submit_info.pCommandBuffers = &command_buffers[0];
+		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
+		vkQueueWaitIdle(vk_queue);
+
+		// We didn't make the buffers individually reset-able, but we're just using it as temp
+		// one to do this upload so clear the pool to reset
+		vkResetCommandPool(vk_device, vk_command_pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+
+		vkDestroyBuffer(vk_device, upload_buffer, nullptr);
+		vkFreeMemory(vk_device, upload_mem, nullptr);
+	}
+
+	// Now build the bottom level acceleration structure
+	VkAccelerationStructureNV blas = VK_NULL_HANDLE;
+	VkDeviceMemory blas_mem = VK_NULL_HANDLE;
+	uint64_t blas_handle = 0;
+	{
+		VkGeometryNV geom_desc = {};
+		geom_desc.sType = VK_STRUCTURE_TYPE_GEOMETRY_NV;
+		geom_desc.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_NV;
+		geom_desc.geometry.triangles.sType = VK_STRUCTURE_TYPE_GEOMETRY_TRIANGLES_NV;
+		geom_desc.geometry.triangles.vertexData = vertex_buffer;
+		geom_desc.geometry.triangles.vertexOffset = 0;
+		geom_desc.geometry.triangles.vertexCount = triangle_verts.size() / 3;
+		geom_desc.geometry.triangles.vertexStride = 3 * sizeof(float);
+		geom_desc.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+		geom_desc.geometry.triangles.indexData = index_buffer;
+		geom_desc.geometry.triangles.indexOffset = 0;
+		geom_desc.geometry.triangles.indexCount = triangle_indices.size();
+		geom_desc.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
+		geom_desc.geometry.triangles.transformData = VK_NULL_HANDLE;
+		geom_desc.geometry.triangles.transformOffset = 0;
+		geom_desc.flags = VK_GEOMETRY_OPAQUE_BIT_NV;
+		// Must be set even if not used
+		geom_desc.geometry.aabbs = {};
+		geom_desc.geometry.aabbs.sType = { VK_STRUCTURE_TYPE_GEOMETRY_AABB_NV };
+
+		VkAccelerationStructureInfoNV accel_info = {};
+		accel_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV;
+		accel_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV;
+		accel_info.instanceCount = 0;
+		accel_info.geometryCount = 1;
+		accel_info.pGeometries = &geom_desc;
+
+		VkAccelerationStructureCreateInfoNV create_info = {};
+		create_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV;
+		create_info.info = accel_info;
+		CHECK_VULKAN(vkCreateAccelerationStructure(vk_device, &create_info, nullptr, &blas));
+
+		// Determine how much memory the acceleration structure will need
+		VkAccelerationStructureMemoryRequirementsInfoNV mem_info = {};
+		mem_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
+		mem_info.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
+		mem_info.accelerationStructure = blas;
+		
+		VkMemoryRequirements2 mem_reqs = {};
+		vkGetAccelerationStructureMemoryRequirements(vk_device, &mem_info, &mem_reqs);
+		// TODO WILL: For a single triangle it requests 64k output and 64k scratch? It seems like a lot.
+		std::cout << "BLAS will need " << mem_reqs.memoryRequirements.size << "b output space\n";
+
+		VkMemoryAllocateInfo alloc_info = {};
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.allocationSize = mem_reqs.memoryRequirements.size;
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryRequirements.memoryTypeBits,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_props);
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &blas_mem));
+
+		// Determine how much additional memory we need for the build
+		mem_info.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_BUILD_SCRATCH_NV;
+		vkGetAccelerationStructureMemoryRequirements(vk_device, &mem_info, &mem_reqs);
+		std::cout << "BLAS will need " << mem_reqs.memoryRequirements.size << "b scratch space\n";
+
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.allocationSize = mem_reqs.memoryRequirements.size;
+		alloc_info.memoryTypeIndex = get_memory_type_index(mem_reqs.memoryRequirements.memoryTypeBits,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_props);
+		VkDeviceMemory scratch_mem = VK_NULL_HANDLE;
+		CHECK_VULKAN(vkAllocateMemory(vk_device, &alloc_info, nullptr, &scratch_mem));
+		
+		// Associate the scratch mem with a buffer
+		VkBufferCreateInfo info = {};
+		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		info.size = mem_reqs.memoryRequirements.size;
+		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		VkBuffer scratch_buffer = VK_NULL_HANDLE;
+		info.usage = VK_BUFFER_USAGE_RAY_TRACING_BIT_NV;
+		CHECK_VULKAN(vkCreateBuffer(vk_device, &info, nullptr, &scratch_buffer));
+		vkBindBufferMemory(vk_device, scratch_buffer, scratch_mem, 0);
+
+		VkBindAccelerationStructureMemoryInfoNV bind_mem_info = {};
+		bind_mem_info.sType = VK_STRUCTURE_TYPE_BIND_ACCELERATION_STRUCTURE_MEMORY_INFO_NV;
+		bind_mem_info.accelerationStructure = blas;
+		bind_mem_info.memory = blas_mem;
+		CHECK_VULKAN(vkBindAccelerationStructureMemory(vk_device, 1, &bind_mem_info));
+		
+		// Grab one of our command buffers and use it to record and run the upload
+		auto &cmd_buf = command_buffers[0];
+
+		VkCommandBufferBeginInfo begin_info = {};
+		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		CHECK_VULKAN(vkBeginCommandBuffer(cmd_buf, &begin_info));
+
+		vkCmdBuildAccelerationStructure(cmd_buf, &accel_info, VK_NULL_HANDLE, 0, false, blas, VK_NULL_HANDLE, scratch_buffer, 0);
+
+		CHECK_VULKAN(vkEndCommandBuffer(cmd_buf));
+
+		// Submit the copy to run
+		VkSubmitInfo submit_info = {};
+		submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submit_info.commandBufferCount = 1;
+		submit_info.pCommandBuffers = &command_buffers[0];
+		CHECK_VULKAN(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE));
+		vkQueueWaitIdle(vk_queue);
+
+		CHECK_VULKAN(vkGetAccelerationStructureHandle(vk_device, blas, sizeof(uint64_t), &blas_handle));
+
+		// We didn't make the buffers individually reset-able, but we're just using it as temp
+		// one to do this upload so clear the pool to reset
+		vkResetCommandPool(vk_device, vk_command_pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+
+		// TODO LATER compaction via vkCmdCopyAccelerationStructureNV
+
+		vkDestroyBuffer(vk_device, scratch_buffer, nullptr);
+		vkFreeMemory(vk_device, scratch_mem, nullptr);
 	}
 
 	// Now record the rendering commands (TODO: Could also do this pre-recording in the DXR backend
