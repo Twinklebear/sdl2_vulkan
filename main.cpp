@@ -7,7 +7,7 @@
 #include <SDL_syswm.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_win32.h>
-#include "shaders.h"
+#include "spirv_shaders_embedded_spv.h"
 
 #define CHECK_VULKAN(FN) \
 	{ \
@@ -241,8 +241,8 @@ int main(int argc, const char **argv) {
 
 		VkShaderModuleCreateInfo create_info = {};
 		create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		create_info.codeSize = sizeof(vertex_shader);
-		create_info.pCode = vertex_shader;
+		create_info.codeSize = sizeof(vert_spv);
+		create_info.pCode = vert_spv;
 		CHECK_VULKAN(vkCreateShaderModule(vk_device, &create_info, nullptr, &vertex_shader_module));
 		
 		VkPipelineShaderStageCreateInfo vertex_stage = {};
@@ -253,8 +253,8 @@ int main(int argc, const char **argv) {
 
 		VkShaderModule fragment_shader_module = VK_NULL_HANDLE;
 		create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		create_info.codeSize = sizeof(fragment_shader);
-		create_info.pCode = fragment_shader;
+		create_info.codeSize = sizeof(frag_spv);
+		create_info.pCode = frag_spv;
 		CHECK_VULKAN(vkCreateShaderModule(vk_device, &create_info, nullptr, &fragment_shader_module));
 
 		VkPipelineShaderStageCreateInfo fragment_stage = {};
